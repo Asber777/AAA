@@ -5,6 +5,10 @@ __pycache__/
 
 # C extensions
 *.so
+exp/
+assert/
+pytorch-REINFORCE/
+test_corruption/
 
 # Distribution / packaging
 .Python

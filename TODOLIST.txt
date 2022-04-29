@@ -1,0 +1,22 @@
+1. 首先确定攻击的模型以及baseline
+- robustbench里只有Linf、L2、corruptions的模型(排除)
+https://github.com/openphilanthropy/unrestricted-adversarial-examples
+Undefended pytorch model(官方有给出, resent)
+如下排行版给出Unrestricted Adversarial Examples Challenge的排行, 不过测试方法使用Spatial grid attck等, 并不是很好的攻击方式. 
+https://github.com/openphilanthropy/unrestricted-adversarial-examples#bird-or-bicycle-dataset
+CVPR比赛只告诉第一阶段使用Efficient-B5, ResneXt101-32×8d and Inception-V4, 第二阶段使用Efficient-L2, ViT-Lagre 和ResNeSt269
+---
+不如看看论文他们的对比方式: 
+数据集: Cifar10 
+ACC指标: (1)对普通未对抗训练模型的攻击 (2)在受对抗训练的模型上比较(3)在某些对抗方法上攻击 
+指标: ACC, LPIPS, Deep Image Structure and Texture Similarity (DISTS) index
+和之前的CAA、LAS-AT等方法进行比较; 和自己使用到的子op进行比较. 
+使用人力评估效果. 
+
+所以现在先确定使用Cifar10攻击advertorch中给出的mardry chanllenge的模型, 以及robustbench中的模型. 
+然后转向imagenet, 写好加载被攻击模型的代码之后开始进行需要使用的op的单独测试. 
+
+
+2. 收集需要作为attack op的代码并且经过测试统一API, 写成可以用CAA遗传算法orRL使用的接口. 
+
+3. 对reinforce进行修改成可以并行训练的形式. 
