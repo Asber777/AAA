@@ -1,1 +1,21 @@
-robustbench
+data_model.py依赖
+robustbench(需要pandas1.2才可以下载以及geotorch, geotorch依赖pytorch1.9, 但是安装的时候会强制安装pytorch1.11.0)
+所以在使用python3.7版本或以上安装好pandas再安装robustbench, 然后删除其中的pytorch1.11.0
+亲测删除1.11pytorch对import robustbench没有影响
+因为貌似autograd这个版本没有(有点忘记了是不是)
+
+
+
+stadv依赖
+kornia einops(这个虽然没有也可以 不过有了很方便, 也想学习一下)
+
+
+einops                        0.4.1
+kornia                        0.6.4
+robustbench                   1.0
+advertorch                    0.2.4       /home/workspace/util/advertorch
+geotorch                      0.3.0
+torch                         1.8.2+cu111
+torchaudio                    0.8.2
+torchdiffeq                   0.2.3
+torchvision                   0.9.2+cu111

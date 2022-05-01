@@ -16,7 +16,18 @@ ACC指标: (1)对普通未对抗训练模型的攻击 (2)在受对抗训练的�
 所以现在先确定使用Cifar10攻击advertorch中给出的mardry chanllenge的模型, 以及robustbench中的模型. 
 然后转向imagenet, 写好加载被攻击模型的代码之后开始进行需要使用的op的单独测试. 
 
-
 2. 收集需要作为attack op的代码并且经过测试统一API, 写成可以用CAA遗传算法orRL使用的接口. 
+拟采用的baseline op:
+1. 空间变换: https://github.com/ayberkydn/stadv-torch
+(stadv.py and )
+2. 评率攻击: https://github.com/LinQinLiang/SSAH-adversarial-attack
+3. 滤波器攻击: https://github.com/smartcameras/FilterFool (需要学一个FCNN, 可以先考虑下面这个)
+4. 滤镜攻击:https://github.com/ZhengyuZhao/AdvColorFilter
+5. CAA中的corruption + mixup
+6. DTMI-FSA: https://github.com/Equationliu/GA-Attack
+7. CW+ Perceptual Color Distance: https://github.com/ZhengyuZhao/PerC-Adversarial
+8. 稀疏pixel攻击: https://github.com/LTS4/SparseFool
+->跑通代码并且记录结果
+
 
 3. 对reinforce进行修改成可以并行训练的形式. 

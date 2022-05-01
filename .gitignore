@@ -7,7 +7,9 @@ __pycache__/
 *.so
 exp/
 assert/
+.empty
 pytorch-REINFORCE/
+stadv-torch/
 test_corruption/
 
 # Distribution / packaging
