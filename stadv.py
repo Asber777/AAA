@@ -1,5 +1,10 @@
 import torch.nn.functional as tf
 import torch
+'''
+论文: https://arxiv.org/pdf/2108.02502.pdf
+代码实现: https://github.com/ayberkydn/stadv-torch
+亲测: 0.9460136217948718 acc (model-standard, cifar10-test)
+'''
 class Flow(torch.nn.Module):
     def __init__(
         self, height, width, in_batch_size=None, init_std=0.01, param=None,

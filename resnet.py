@@ -1,4 +1,7 @@
-'''ResNet18/34/50/101/152 in Pytorch.'''
+'''
+ResNet18/34/50/101/152 in Pytorch.
+This file is for agent's network.
+'''
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
