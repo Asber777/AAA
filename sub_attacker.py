@@ -1,11 +1,4 @@
-'''
-下面包括了 
-1. mixup的污染攻击corruption
-2. hsv_attack
-3. 
-
-'''
-
+from turtle import width
 import torch
 import torch as ch
 import numpy as np
@@ -97,7 +90,7 @@ def flow_uv(x, flow_layer):
     img_yuv = kornia.color.rgb_to_yuv(x)
     img_y = img_yuv[:, :1, :, :]
     img_uv = img_yuv[:, 1:, :, :]
-    flowed_img = flow_layer(img_uv)
+    flowed_img = flow_layer.forward(img_uv)
     flowed_img = torch.cat([img_y, flowed_img], dim=-3)
     return kornia.color.yuv_to_rgb(flowed_img)
 
@@ -105,7 +98,7 @@ def flow_h(x, flow_layer):
     img_hsv = kornia.color.rgb_to_hsv(x)
     img_h = img_hsv[:, :1, :, :]
     img_sv = img_hsv[:, 1:, :, :]
-    flowed_img = flow_layer(img_h)
+    flowed_img = flow_layer.forward(img_h)
     flowed_img = torch.cat([flowed_img, img_sv], dim=-3)
     return kornia.color.hsv_to_rgb(flowed_img)
 
@@ -113,17 +106,18 @@ def flow_ab(x, flow_layer):
     img_lab = kornia.color.rgb_to_lab(x)
     img_l = img_lab[:, :1, :, :]
     img_ab = img_lab[:, 1:, :, :]
-    flowed_img = flow_layer(img_ab)
+    flowed_img = flow_layer.forward(img_ab)
     flowed_img = torch.cat([img_l, flowed_img], dim=-3)
     return kornia.color.lab_to_rgb(flowed_img)
 
 
 import matplotlib.pyplot as plt
-def flow_perturb(x, y, net, nb_iter=10, tau=50, domain='rgb'):
+def flow_perturb(x, y, net, nb_iter=10, tau=50, domain='lab'):
+    height, width = x.shape[-2], x.shape[-1]
     match = {'lab': flow_ab, 'hsv': flow_h, 'yuv': flow_uv} # RGB的先放着吧..
     flow_channel = match[domain]
-    flow = Flow(x.shape[-2], x.shape[-1]).cuda()
-    optimizer = torch.optim.Adam(flow.parameters(), lr=0.01)
+    flow = Flow(height, width)
+    optimizer = torch.optim.Adam([flow._pre_flow_field], lr=0.01)
     for n in range(nb_iter):
         flowed_img = flow_channel(x, flow)
         flowed_img = clamp(flowed_img, min=0, max=1)
@@ -134,27 +128,22 @@ def flow_perturb(x, y, net, nb_iter=10, tau=50, domain='rgb'):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    return flowed_img
+    return flowed_img.detach().clone()
 
-class Flow(torch.nn.Module):
+class Flow():
     def __init__(self, height=32, width=32, init_std=0.01):
         super().__init__()
         self.H = height
         self.W = width
-        self.basegrid = torch.nn.Parameter(
-                torch.cartesian_prod(
+        self.basegrid = torch.cartesian_prod(
                     torch.linspace(-1, 1, self.H), torch.linspace(-1, 1, self.W)
-                ).view(self.H, self.W, 2).unsqueeze(0)
-        )
-        self._pre_flow_field = torch.nn.Parameter(
-            torch.randn([1, self.H, self.W, 2]) * init_std,
-            requires_grad=True,
-        )
+                ).view(self.H, self.W, 2).unsqueeze(0).cuda()
+        self._pre_flow_field = (torch.randn([1, self.H, self.W, 2]) * init_std).cuda()
+        self._pre_flow_field.requires_grad = True
 
     def _normalize_grid(self, in_grid):
-        grid_x = in_grid[..., 0] # 得到在x方向上的grid偏移量
-        grid_y = in_grid[..., 1] # 得到在y方向上的grid偏移量
-        # 对每个方向的偏移图分别normalize一下再拼接成原来对size
+        grid_x = in_grid[..., 0]
+        grid_y = in_grid[..., 1] 
         return torch.stack([grid_x * 2 / self.H, grid_y * 2 / self.W], dim=-1)
 
     def forward(self, x):
@@ -221,34 +210,59 @@ class SubAttacker():
         net.eval()
         return self.oplist[action](x, y, net)
 
+# def _normalize_grid(in_grid, H, W):
+#     grid_x = in_grid[..., 0]
+#     grid_y = in_grid[..., 1] 
+#     return torch.stack([grid_x * 2 / H, grid_y * 2 / W], dim=-1)
 
-if __name__=='__main__':
-    import matplotlib.pyplot as plt
-    from data_model import load_cifar10_data, load_cifar10_stander_model
-    net = load_cifar10_stander_model().cuda().eval()
-    attack = SubAttacker(10)
-    for x, y in load_cifar10_data(batch_size=1):
-        x, y = x.cuda(), y.cuda()
-        plt.imshow(kornia.tensor_to_image(x[0]))
-        plt.savefig('x.png')
-        for i in range(attack.num_op):
-            print(attack.op_name[i])
-            advx = attack.attack(i, x, y, net)
-            plt.imshow(kornia.tensor_to_image(advx[0]))
-            plt.savefig('advx{}.png'.format(i))
-        break
-        
+# def flow_uv(x, flow_layer):
+#     img_yuv = kornia.color.rgb_to_yuv(x)
+#     img_y = img_yuv[:, :1, :, :]
+#     img_uv = img_yuv[:, 1:, :, :]
+#     flowed_img = flow_layer.forward(img_uv)
+#     flowed_img = torch.cat([img_y, flowed_img], dim=-3)
+#     return kornia.color.yuv_to_rgb(flowed_img)
 
-# if __name__=='__main__':
-#     from data_model import load_cifar10_data, load_cifar10_stander_model
-#     import matplotlib.pyplot as plt
-#     net = load_cifar10_stander_model().cuda().eval()
-#     for x, y in load_cifar10_data(batch_size=1):
-#         x, y = x.cuda(), y.cuda()
-#         plt.imshow(kornia.tensor_to_image(x[0]))
-#         plt.savefig('x.png')
-#         advx = flow_perturb(x, y, net, nb_iter=10, domain='rgb')
-#         plt.imshow(kornia.tensor_to_image(advx[0]))
-#         plt.savefig('advx.png')
-#         break
+# def flow_h(x, flow_layer):
+#     img_hsv = kornia.color.rgb_to_hsv(x)
+#     img_h = img_hsv[:, :1, :, :]
+#     img_sv = img_hsv[:, 1:, :, :]
+#     flowed_img = flow_layer.forward(img_h)
+#     flowed_img = torch.cat([flowed_img, img_sv], dim=-3)
+#     return kornia.color.hsv_to_rgb(flowed_img)
 
+# # !
+
+# def flow_ab(x, basegrid, _pre_flow_field):
+#     img_lab = kornia.color.rgb_to_lab(x)
+#     img_l = img_lab[:, :1, :, :]
+#     img_ab = img_lab[:, 1:, :, :]
+#     H, W = x.shape[-2], x.shape[-1]
+#     grid = basegrid + _normalize_grid(_pre_flow_field, H, W)
+#     flowed_img = tf.grid_sample(img_ab, grid, align_corners=True, padding_mode="reflection")
+#     flowed_img = torch.cat([img_l, flowed_img], dim=-3)
+#     return kornia.color.lab_to_rgb(flowed_img)
+
+# def flow_perturb(x, y, net, nb_iter=10, tau=50, domain='lab', kappa=-1):
+#     H, W = x.shape[-2], x.shape[-1]
+#     basegrid = torch.cartesian_prod(torch.linspace(-1, 1, H), \
+#         torch.linspace(-1, 1, W)).view(H, W, 2).unsqueeze(0).cuda()
+#     _pre_flow_field = (torch.randn([1, H, W, 2]) * 0.01).cuda()
+#     _pre_flow_field.requires_grad = True
+#     match = {'lab': flow_ab, 'hsv': flow_h, 'yuv': flow_uv}
+#     flow_channel = match[domain]
+#     optimizer = torch.optim.Adam([_pre_flow_field], lr=0.01)
+#     for n in range(nb_iter):
+#         flowed_img = flow_channel(x, basegrid, _pre_flow_field)
+#         flowed_img = clamp(flowed_img, min=0, max=1)
+#         out = net(flowed_img)
+#         if out.argmax(dim=1) != y:
+#             return flowed_img
+#         top2, _ = torch.topk(out, 2)
+#         advloss =  torch.maximum(top2[0,0] - top2[0,1], torch.tensor(kappa))
+#         flow_loss = tv(_pre_flow_field)
+#         loss = (advloss + tau * flow_loss).sum()
+#         optimizer.zero_grad()
+#         loss.backward()
+#         optimizer.step()
+#     return flowed_img.detach().clone()
