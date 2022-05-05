@@ -49,43 +49,41 @@ def hsv_attack(x, y, net, num_trials = 50): # 效果很差..
     return X
 
 from torch.nn import functional as F
-class Spatial:
-    def __init__(self, spatial_constraint=15,):
-        self.max_rot = float(spatial_constraint)
-        self.max_trans = 4/32.
-
-    # x: [1, 3, w, h]
-    def op(self, x, angle, txs1, txs2):
-        rots = angle * 0.01745327778 
-        theta = ch.tensor([
-            [math.cos(rots),math.sin(-rots),txs1],
-            [math.sin(rots),math.cos(rots),txs2]
-        ], dtype=ch.float).cuda()
-        grid = F.affine_grid(theta.unsqueeze(0), x.size())
-        X = F.grid_sample(x, grid, align_corners=True)
-        return X
+def op(x, angle, txs1, txs2):
+    rots = angle * 0.01745327778 
+    theta = ch.tensor([
+        [math.cos(rots),math.sin(-rots),txs1],
+        [math.sin(rots),math.cos(rots),txs2]
+    ], dtype=ch.float).cuda()
+    grid = F.affine_grid(theta.unsqueeze(0), x.size())
+    X = F.grid_sample(x, grid, align_corners=True)
+    return X
         
-    def random_attack(self, x):
-        angle = unif(1, -self.max_rot, self.max_rot)
-        trans = unif(2, -self.max_trans, self.max_trans)
-        return self.op(x, angle, trans[0], trans[1])
+def random_rt_attack(x, y, net, nb_iter=10, max_rot=15., max_trans=4./32):
+    for i in range(nb_iter):
+        angle = unif(1, -max_rot, max_rot)
+        trans = unif(2, -max_trans, max_trans)
+        advx = op(x, angle, trans[0], trans[1])
+        if net(advx).argmax(dim=1) != y:
+            return advx
+    return advx
 
-    def grid_attack(self, x, net, y):
-        limits, granularity = [self.max_trans, self.max_trans, self.max_rot], [5, 5, 15]
-        mask = 1 - one_hot(y[0], num_classes=10)
-        grid = product(*list(np.linspace(-l, l, num=g) for l, g in zip(limits, granularity)))
-        max_logits, best_para, max_out = -1, [None, None, None], None
-        for tx, ty, angle in grid:
-            output = self.op(x, angle, tx, ty)
-            logits = net(output)
-            if logits.argmax(dim=1) != y:
-                return output
-            logits = softmax(logits, dim=1)
-            if (logits*mask).max() > max_logits:
-                max_logits = (logits*mask).max()
-                best_para = [angle, tx, ty]
-                max_out = output
-        return max_out
+def grid_rt_attack(x, y, net, max_rot=15., max_trans=4./32):
+    limits, granularity = [max_trans, max_trans, max_rot], [5, 5, 10]
+    mask = 1 - one_hot(y[0], num_classes=10)
+    grid = product(*list(np.linspace(-l, l, num=g) for l, g in zip(limits, granularity)))
+    max_logits, best_para, max_out = -1, [None, None, None], None
+    for tx, ty, angle in grid:
+        output = op(x, angle, tx, ty)
+        logits = net(output)
+        if logits.argmax(dim=1) != y:
+            return output
+        logits = softmax(logits, dim=1)
+        if (logits*mask).max() > max_logits:
+            max_logits = (logits*mask).max()
+            best_para = [angle, tx, ty]
+            max_out = output
+    return max_out
 
 from piqa.tv import tv
 def Adv_loss(adv_logits, target_class, kappa):
@@ -95,7 +93,7 @@ def Adv_loss(adv_logits, target_class, kappa):
     loss =  torch.maximum(target_class_logit - nontarget_max, torch.tensor(kappa))
     return loss
 
-def flow_uv(x, y, flow_layer):
+def flow_uv(x, flow_layer):
     img_yuv = kornia.color.rgb_to_yuv(x)
     img_y = img_yuv[:, :1, :, :]
     img_uv = img_yuv[:, 1:, :, :]
@@ -103,7 +101,7 @@ def flow_uv(x, y, flow_layer):
     flowed_img = torch.cat([img_y, flowed_img], dim=-3)
     return kornia.color.yuv_to_rgb(flowed_img)
 
-def flow_h(x, y, flow_layer):
+def flow_h(x, flow_layer):
     img_hsv = kornia.color.rgb_to_hsv(x)
     img_h = img_hsv[:, :1, :, :]
     img_sv = img_hsv[:, 1:, :, :]
@@ -111,7 +109,7 @@ def flow_h(x, y, flow_layer):
     flowed_img = torch.cat([flowed_img, img_sv], dim=-3)
     return kornia.color.hsv_to_rgb(flowed_img)
 
-def flow_ab(x, y, flow_layer):
+def flow_ab(x, flow_layer):
     img_lab = kornia.color.rgb_to_lab(x)
     img_l = img_lab[:, :1, :, :]
     img_ab = img_lab[:, 1:, :, :]
@@ -119,17 +117,33 @@ def flow_ab(x, y, flow_layer):
     flowed_img = torch.cat([img_l, flowed_img], dim=-3)
     return kornia.color.lab_to_rgb(flowed_img)
 
-def flow_rgb(x, y, flow_layer):
-    flowed_img = flow_layer(x)
+# def flow_rgb(x, flow_layer):  # 测试之后莫名其妙会.... 旋转 待解决
+#     flowed_img = flow_layer(x)
+#     return flowed_img
+
+import matplotlib.pyplot as plt
+def flow_perturb(x, y, net, nb_iter=10, tau=50, domain='rgb'):
+    match = {'lab': flow_ab, 'hsv': flow_h, 'yuv': flow_uv} # RGB的先放着吧..
+    flow_channel = match[domain]
+    flow = Flow(x.shape[-2], x.shape[-1]).cuda()
+    optimizer = torch.optim.Adam(flow.parameters(), lr=0.01)
+    for n in range(nb_iter):
+        flowed_img = flow_channel(x, flow)
+        flowed_img = clamp(flowed_img, min=0, max=1)
+        out = net(flowed_img)
+        adv_loss = Adv_loss(out, y, -1)
+        flow_loss = tv(flow._pre_flow_field)
+        loss = (adv_loss + tau * flow_loss).sum()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
     return flowed_img
 
 class Flow(torch.nn.Module):
-    def __init__(self, net, height=32, width=32, init_std=0.01, tau=50, domain_name='rgb'):
+    def __init__(self, height=32, width=32, init_std=0.01):
         super().__init__()
-        self.net = net
         self.H = height
         self.W = width
-        self.tau = tau
         self.basegrid = torch.nn.Parameter(
                 torch.cartesian_prod(
                     torch.linspace(-1, 1, self.H), torch.linspace(-1, 1, self.W)
@@ -139,9 +153,6 @@ class Flow(torch.nn.Module):
             torch.randn([1, self.H, self.W, 2]) * init_std,
             requires_grad=True,
         )
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
-        match = {'rgb': flow_rgb, 'lab': flow_ab, 'hsv': flow_h, 'yuv': flow_uv}
-        self.flow_channel = match[domain_name]
 
     def _normalize_grid(self, in_grid):
         grid_x = in_grid[..., 0] # 得到在x方向上的grid偏移量
@@ -152,19 +163,6 @@ class Flow(torch.nn.Module):
     def forward(self, x):
         grid = self.basegrid + self._normalize_grid(self._pre_flow_field)
         return tf.grid_sample(x, grid, align_corners=True, padding_mode="reflection")
-
-    def perturb(self, x, y, num_step=10):
-        for n in range(num_step):
-            # 找到原因了 是因为flowed_img不断在变化 所以结果也在变 (是这样吗?) 
-            flowed_img = self.flow_channel(x, self)
-            out = self.net(flowed_img)
-            adv_loss = Adv_loss(out, y, -1)
-            flow_loss = tv(self._pre_flow_field)
-            loss = (adv_loss + self.tau * flow_loss).sum()
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-        return flowed_img
 
 import torch.nn as nn
 from torch import clamp
@@ -178,7 +176,6 @@ def pgd(x, y, net, nb_iter=10, eps=8./255, eps_iter=2./255,
         delta.data.uniform_(-1, 1)
         delta.data *= eps
         delta.data = clamp(x + delta.data, min=clip_min, max=clip_max) - x
-    # begin PGD
     delta.requires_grad_()
     for _ in range(nb_iter):
         outputs = net(x + delta)
@@ -194,4 +191,67 @@ def pgd(x, y, net, nb_iter=10, eps=8./255, eps_iter=2./255,
         delta.grad.data.zero_()
     x_adv = clamp(x + delta, clip_min, clip_max)
     return x_adv.data
+
+from random import choice
+class SubAttacker():
+    def __init__(self, nb_iter) -> None:
+        self.nb_iter = nb_iter
+        self.corrupt_list = ['defocus_blur', 'shot_noise', 'saturate', 'gaussian_blur','gaussian_noise', 'jpeg_compression', 'speckle_noise', 'spatter','brightness','zoom_blur', 'motion_blur','contrast']
+        self.oplist = [
+            lambda x, y, net: flow_perturb(x, y, net, nb_iter, domain='lab'),
+            lambda x, y, net: flow_perturb(x, y, net, nb_iter, domain='hsv'),
+            lambda x, y, net: flow_perturb(x, y, net, nb_iter, domain='yuv'),
+            lambda x, y, net: pgd(x, y, net, nb_iter),
+            lambda x, y, net: random_rt_attack(x, y, net, nb_iter),
+            lambda x, y, net: grid_rt_attack(x, y, net),
+            lambda x, y, net: mixupCorruptions(x, choice(self.corrupt_list))
+        ]
+        self.num_op = len(self.oplist)
+        self.op_name = [
+            'lab_flow_attack',
+            'hsv_flow_attack',
+            'yuv_flow_attack',
+            'pgd', 
+            'random_rotaion_trans',
+            'grid_rotaion_trans',
+            'mixupCorruptions'
+        ]
+
+    def attack(self, action: int, x, y, net):
+        assert 0<= action <self.num_op
+        x = x.clone().detach()
+        y = y.clone().detach()
+        net.eval()
+        return self.oplist[action](x, y, net)
+
+
+if __name__=='__main__':
+    import matplotlib.pyplot as plt
+    from data_model import load_cifar10_data, load_cifar10_stander_model
+    net = load_cifar10_stander_model().cuda().eval()
+    attack = SubAttacker(10)
+    for x, y in load_cifar10_data(batch_size=1):
+        x, y = x.cuda(), y.cuda()
+        plt.imshow(kornia.tensor_to_image(x[0]))
+        plt.savefig('x.png')
+        for i in range(attack.num_op):
+            print(attack.op_name[i])
+            advx = attack.attack(i, x, y, net)
+            plt.imshow(kornia.tensor_to_image(advx[0]))
+            plt.savefig('advx{}.png'.format(i))
+        break
+        
+
+# if __name__=='__main__':
+#     from data_model import load_cifar10_data, load_cifar10_stander_model
+#     import matplotlib.pyplot as plt
+#     net = load_cifar10_stander_model().cuda().eval()
+#     for x, y in load_cifar10_data(batch_size=1):
+#         x, y = x.cuda(), y.cuda()
+#         plt.imshow(kornia.tensor_to_image(x[0]))
+#         plt.savefig('x.png')
+#         advx = flow_perturb(x, y, net, nb_iter=10, domain='rgb')
+#         plt.imshow(kornia.tensor_to_image(advx[0]))
+#         plt.savefig('advx.png')
+#         break
 
