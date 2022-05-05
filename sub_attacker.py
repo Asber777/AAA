@@ -117,9 +117,6 @@ def flow_ab(x, flow_layer):
     flowed_img = torch.cat([img_l, flowed_img], dim=-3)
     return kornia.color.lab_to_rgb(flowed_img)
 
-# def flow_rgb(x, flow_layer):  # 测试之后莫名其妙会.... 旋转 待解决
-#     flowed_img = flow_layer(x)
-#     return flowed_img
 
 import matplotlib.pyplot as plt
 def flow_perturb(x, y, net, nb_iter=10, tau=50, domain='rgb'):

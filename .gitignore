@@ -11,7 +11,7 @@ assert/
 pytorch-REINFORCE/
 stadv-torch/
 test_corruption/
-
+sub_op_test/
 # Distribution / packaging
 .Python
 build/
